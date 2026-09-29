@@ -20,8 +20,11 @@ CCFolia 個人用 userscript 集合。所有腳本都可獨立安裝與啟用，
 - 明暗主題切換、多頻道紀錄的頻道篩選
 - 編輯模式：修改標題、發言者名稱與顏色、訊息內容，刪除訊息；或直接編輯原始碼
 - 儲存（`Ctrl+S`）、下載修改後的 HTML（維持 CCFolia 原格式）、刪除檔案
+- 分享：產生唯讀連結給他人閱覽，對方不需登入，畫面只有紀錄內容與明暗主題切換
 
-檔案存放在瀏覽器的 IndexedDB，不會上傳到任何伺服器，也不會跨裝置同步。
+檔案存放在瀏覽器的 IndexedDB，不會自動上傳，也不會跨裝置同步。
+
+分享功能會把紀錄上傳到你自己 GitHub 帳號的 Secret Gist（不公開列出，但拿到連結的人都能看）。第一次分享時需要一組只勾選 `gist` 權限的 [GitHub token](https://github.com/settings/tokens/new?scopes=gist&description=CCFolia%20Log%20Viewer)，token 只存在該瀏覽器。修改後按「更新分享內容」同步到連結；「停止分享」會刪除 Gist，舊連結隨即失效。
 
 部署到 GitHub Pages：Settings → Pages → Source 選 `Deploy from a branch`，分支選 `main`、資料夾 `/ (root)`。完成後網址為 `https://<帳號>.github.io/CCFolia-Personal-Plugins/log-viewer/`。
 
