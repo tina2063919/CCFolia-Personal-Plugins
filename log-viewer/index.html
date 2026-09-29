@@ -451,18 +451,26 @@ const DB = (() => {
 })();
 navigator.storage?.persist?.();
 
-/* ================= 檔案格式（CCFolia / Discord 機器人匯出） ================= */
+/* ================= 檔案格式（CCFolia / 舊版 CCFolia / Discord 機器人匯出） ================= */
 const DC_MSG = '.wrap > .msg, .wrap > .sysmsg';
 const DC_ITEMS = DC_MSG + ', .wrap > .div';
 const isDiscord = (doc) => !doc.querySelector('article.message') && !!doc.querySelector('.wrap > .msg .bd');
+// 舊版 CCFolia：<p style="color:…"><span>[頻道]</span><span>名稱</span> : <span>內文</span></p>
+const OLD_MSG = 'body > p';
+const isOld = (doc) => !doc.querySelector('article.message') && !isDiscord(doc) && !!doc.querySelector('body > p > span + span + span');
+const oldDefaultTitle = 'ccfolia - logs';
 
 function parseLog(html) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  if (!doc.querySelector('article.message') && !isDiscord(doc)) {
+  if (!doc.querySelector('article.message') && !isDiscord(doc) && !isOld(doc)) {
     throw new Error('找不到訊息，請確認是 CCFolia 或 Discord 機器人匯出的 HTML');
   }
   return doc;
 }
+const itemSel = (doc) => (isDiscord(doc) ? DC_ITEMS : isOld(doc) ? OLD_MSG : 'article.message');
+// 舊版的頻道寫在第一個 span，例如「 [main]」
+const chanOf = (node) => node.dataset.channel
+  ?? (node.matches('p') ? (node.children[0]?.textContent.trim().replace(/^\[(.*)\]$/, '$1') ?? '') : '');
 const titleEl = (doc) => doc.querySelector('.log-title') || doc.querySelector('.hdr h1');
 const getTitle = (doc) => (titleEl(doc)?.textContent || doc.title || '未命名').trim();
 function setTitle(doc, t) {
@@ -470,8 +478,8 @@ function setTitle(doc, t) {
   const h = titleEl(doc);
   if (h) h.textContent = t;
 }
-const logItems = (doc) => [...doc.querySelectorAll(isDiscord(doc) ? DC_ITEMS : 'article.message')];
-const countMsgs = (doc) => doc.querySelectorAll(isDiscord(doc) ? DC_MSG : 'article.message').length;
+const logItems = (doc) => [...doc.querySelectorAll(itemSel(doc))];
+const countMsgs = (doc) => doc.querySelectorAll(isDiscord(doc) ? DC_MSG : itemSel(doc)).length;
 const safeUrl = (u) => (/^(data:image\/|https?:\/\/)/i.test(u || '') && !/["\\\n<]/.test(u) ? u : null);
 const trimText = (s) => s.replace(/^\n+|\s+$/g, '');
 
@@ -483,6 +491,16 @@ function dcText(node) {
   c.querySelectorAll('li, pre').forEach((b) => b.append('\n'));
   return c.textContent;
 }
+// 舊版內文：原始碼縮排的換行不算，<br> 才是換行
+function oldText(span) {
+  if (!span) return '';
+  const c = span.cloneNode(true);
+  const walk = c.ownerDocument.createTreeWalker(c, NodeFilter.SHOW_TEXT);
+  for (let n; (n = walk.nextNode());) n.data = n.data.replace(/\n\s*/g, '');
+  c.querySelectorAll('br').forEach((b) => b.replaceWith('\n'));
+  return c.textContent.trim();
+}
+const oldColor = (p) => /(?:^|;)\s*color:\s*([^;]+)/.exec(p.getAttribute('style') || '')?.[1].trim() || null;
 const dcBlock = (e) => [...e.children].map((c) => dcText(c).trim()).filter(Boolean).join('\n') || e.textContent.trim();
 
 // 將原檔訊息節點讀成統一的資料
@@ -505,6 +523,13 @@ function readMsg(node) {
       edited: !!node.querySelector('.edited'),
       roll: roll && { text: roll.textContent, cls: ['success', 'failure', 'critical', 'fumble'].filter((c) => roll.classList.contains(c)) },
     };
+  }
+  if (node.matches('p')) {
+    const [, nm, tx] = node.children;
+    const name = nm?.textContent.trim() ?? '';
+    const text = oldText(tx);
+    if (name === 'system') return { kind: 'sys', text };
+    return { kind: 'msg', text, name, color: oldColor(node) };
   }
   // Discord
   if (node.classList.contains('div')) return { kind: 'divider', text: node.textContent.trim() };
@@ -542,6 +567,13 @@ function writeMsg(node, { text, name, color }) {
     return;
   }
   const d = node.ownerDocument;
+  if (node.matches('p')) {
+    const [, nm, tx] = node.children;
+    if (tx) tx.replaceChildren(...text.split('\n').flatMap((l, i) => (i ? [d.createElement('br'), l] : [l])));
+    if (nm && name != null) nm.textContent = name;
+    if (color) node.setAttribute('style', 'color:' + color + ';');
+    return;
+  }
   if (node.classList.contains('div')) { node.textContent = text; return; }
   if (node.classList.contains('sysmsg')) {
     [...node.childNodes].filter((n) => n.nodeType === 3).forEach((n) => n.remove());
@@ -615,7 +647,7 @@ function el(tag, cls, text) {
 function renderMsg(art) {
   const m = readMsg(art);
   const box = el('div', 'msg' + (m.kind === 'msg' ? '' : ' sys') + (m.kind === 'divider' ? ' divider' : ''));
-  box.dataset.channel = art.dataset.channel || '';
+  box.dataset.channel = chanOf(art);
   srcOf.set(box, art);
 
   if (m.kind !== 'msg') {
@@ -682,7 +714,7 @@ function renderLog() {
   document.title = getTitle(doc) + ' - CCFolia Log 檢視器';
 
   const arts = logItems(doc);
-  const channels = [...new Set(arts.map((a) => a.dataset.channel || ''))];
+  const channels = [...new Set(arts.map(chanOf))];
   const sel = $('#channel');
   if (!channels.includes(state.channel)) state.channel = '';
   sel.hidden = channels.length < 2;
@@ -805,8 +837,13 @@ async function uploadFiles(list) {
   let lastId = null, ok = 0;
   for (const file of list) {
     try {
-      const html = await file.text();
+      let html = await file.text();
       const doc = parseLog(html);
+      // 舊版沒有標題，改用檔名
+      if (isOld(doc) && getTitle(doc) === oldDefaultTitle) {
+        setTitle(doc, file.name.replace(/\.html?$/i, ''));
+        html = serialize(doc);
+      }
       const id = newId();
       const now = Date.now();
       await DB.put({ id, name: file.name, title: getTitle(doc), count: countMsgs(doc), createdAt: now, updatedAt: now }, html);
