@@ -12,6 +12,19 @@ CCFolia 個人用 userscript 集合。所有腳本都可獨立安裝與啟用，
 | [ccf-light-input.user.js](ccf-light-input.user.js) | 將聊天輸入區與訊息紀錄切換為明亮主題，並為各聊天頁籤分別保存輸入草稿。 |
 | [ccf-tab-notify.user.js](ccf-tab-notify.user.js) | 偵測其他聊天頁籤的新訊息並播放提示音，可設定音量及各頁籤是否提示。 |
 
+## Log 檢視器
+
+[log-viewer/index.html](log-viewer/index.html) 是單一檔案的靜態網頁，用來讀取與展示 CCFolia 匯出的 HTML 紀錄。
+
+- 上傳（按鈕或拖曳，可一次多檔）、已上傳檔案列表與搜尋
+- 明暗主題切換、多頻道紀錄的頻道篩選
+- 編輯模式：修改標題、發言者名稱與顏色、訊息內容，刪除訊息；或直接編輯原始碼
+- 儲存（`Ctrl+S`）、下載修改後的 HTML（維持 CCFolia 原格式）、刪除檔案
+
+檔案存放在瀏覽器的 IndexedDB，不會上傳到任何伺服器，也不會跨裝置同步。
+
+部署到 GitHub Pages：Settings → Pages → Source 選 `Deploy from a branch`，分支選 `main`、資料夾 `/ (root)`。完成後網址為 `https://<帳號>.github.io/CCFolia-Personal-Plugins/log-viewer/`。
+
 ## 安裝
 
 1. 在瀏覽器安裝 Tampermonkey 或其他 userscript 管理器。

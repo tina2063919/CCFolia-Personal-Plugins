@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CCFolia Log 檢視器</title>
+<script>
+  // 提前套用主題，避免閃爍
+  (() => {
+    let t = null;
+    try { t = localStorage.getItem('lv-theme'); } catch {}
+    if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
+<style>
+  :root {
+    --bg: #f7f7f8;
+    --surface: #ffffff;
+    --text: #1f1f22;
+    --muted: #6e6e76;
+    --border: #e4e4e7;
+    --hover: rgba(0, 0, 0, .04);
+    --accent: #2f6fdb;
+    --accent-text: #ffffff;
+    --success: #1b6fd0;
+    --fail: #c2185b;
+    --danger: #c62828;
+    --speaker-mix: #000;
+    --speaker-amount: 62%;
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --bg: #121214;
+    --surface: #1a1a1d;
+    --text: #e8e8ea;
+    --muted: #8b8b93;
+    --border: #2b2b30;
+    --hover: rgba(255, 255, 255, .05);
+    --accent: #5b9bff;
+    --accent-text: #0d1117;
+    --success: #4ea3f5;
+    --fail: #f06292;
+    --danger: #ef5350;
+    --speaker-mix: #000;
+    --speaker-amount: 100%;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    display: grid;
+    grid-template-rows: 52px 1fr;
+    overflow: hidden;
+  }
+  button, input, textarea, select { font: inherit; color: inherit; }
+
+  /* ---------- 頂列 ---------- */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; white-space: nowrap; }
+  header .spacer { flex: 1; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.danger { color: var(--danger); }
+  .btn.on { border-color: var(--accent); color: var(--accent); }
+  .btn.icon { width: 32px; padding: 0; justify-content: center; }
+  .btn:disabled { opacity: .45; cursor: default; }
+  #menuBtn { display: none; }
+
+  /* ---------- 版面 ---------- */
+  .layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    min-height: 0;
+  }
+  aside {
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .aside-top { padding: 12px; border-bottom: 1px solid var(--border); }
+  .field {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+  }
+  .field:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  #fileList { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
+  #fileList li {
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #fileList li:hover { background: var(--hover); }
+  #fileList li.active { background: var(--hover); box-shadow: inset 3px 0 0 var(--accent); }
+  #fileList .name { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #fileList .meta { font-size: 12px; color: var(--muted); }
+  .list-empty { padding: 16px; color: var(--muted); font-size: 13px; }
+  .aside-foot { padding: 8px 12px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+
+  main { overflow-y: auto; min-height: 0; }
+
+  /* ---------- 工具列 ---------- */
+  .toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 24px;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  .toolbar .spacer { flex: 1; }
+  .dirty-dot { font-size: 12px; color: var(--muted); }
+  select.field { width: auto; }
+
+  .log {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 0 24px 64px;
+  }
+  #title {
+    display: block;
+    width: 100%;
+    margin: 24px 0 8px;
+    padding: 4px 0;
+    border: 0;
+    border-bottom: 1px solid transparent;
+    background: transparent;
+    font-size: 24px;
+    font-weight: 600;
+  }
+  #title:read-only { outline: none; cursor: default; }
+  .editing #title { border-bottom-color: var(--border); }
+  .log-info { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+
+  /* ---------- 訊息 ---------- */
+  .msg {
+    position: relative;
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    column-gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .msg.sys { display: block; padding: 8px 0 8px 52px; color: var(--muted); font-size: 14px; }
+  .avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--hover) no-repeat center / cover;
+  }
+  .avatar.none { background: transparent; }
+  .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+  .speaker {
+    font-weight: 600;
+    font-size: 14px;
+    color: color-mix(in srgb, var(--c, #888) var(--speaker-amount), var(--speaker-mix));
+  }
+  .time, .edited, .chan { font-size: 12px; color: var(--muted); }
+  .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .text:empty { display: none; }
+  .roll { display: block; white-space: pre-wrap; color: var(--muted); font-size: 14px; }
+  .roll.success, .roll.critical { color: var(--success); }
+  .roll.failure, .roll.fumble { color: var(--fail); }
+
+  .acts { display: none; position: absolute; top: 8px; right: 0; gap: 4px; }
+  .editing .msg:hover .acts, .editing .msg:focus-within .acts { display: flex; }
+  .acts .btn { height: 26px; padding: 0 8px; font-size: 12px; }
+
+  .editor { grid-column: 1 / -1; display: grid; gap: 8px; }
+  .editor .row { display: flex; gap: 8px; align-items: center; }
+  .editor .row.end { justify-content: flex-end; }
+  .editor input[type="color"] { width: 40px; height: 32px; padding: 2px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+  textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    resize: vertical;
+    line-height: 1.6;
+  }
+
+  /* ---------- 空狀態 / 拖曳 ---------- */
+  .empty {
+    display: grid;
+    place-items: center;
+    height: 100%;
+    padding: 24px;
+  }
+  .drop-card {
+    max-width: 420px;
+    width: 100%;
+    padding: 40px 24px;
+    text-align: center;
+    border: 1.5px dashed var(--border);
+    border-radius: 12px;
+    color: var(--muted);
+  }
+  .drop-card strong { display: block; color: var(--text); font-size: 17px; margin-bottom: 6px; }
+  .drop-card .btn { margin-top: 16px; }
+  body.dragging::after {
+    content: "放開以上傳 HTML";
+    position: fixed;
+    inset: 12px;
+    display: grid;
+    place-items: center;
+    border: 2px dashed var(--accent);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--bg) 85%, transparent);
+    color: var(--accent);
+    font-size: 18px;
+    z-index: 50;
+    pointer-events: none;
+  }
+
+  /* ---------- 原始碼對話框 ---------- */
+  dialog {
+    width: min(960px, calc(100vw - 32px));
+    height: min(80vh, 800px);
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text);
+  }
+  dialog::backdrop { background: rgba(0, 0, 0, .45); }
+  dialog form { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
+  dialog .d-head, dialog .d-foot { display: flex; align-items: center; gap: 8px; padding: 12px 16px; }
+  dialog .d-head { border-bottom: 1px solid var(--border); font-weight: 600; }
+  dialog .d-foot { border-top: 1px solid var(--border); justify-content: flex-end; }
+  dialog textarea { border: 0; border-radius: 0; resize: none; font: 13px/1.5 ui-monospace, Consolas, monospace; white-space: pre; }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    padding: 8px 16px;
+    border-radius: 6px;
+    background: var(--text);
+    color: var(--bg);
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity .2s;
+    pointer-events: none;
+    z-index: 60;
+  }
+  .toast.show { opacity: 1; }
+
+  /* ---------- 手機 ---------- */
+  @media (max-width: 768px) {
+    #menuBtn { display: inline-flex; }
+    header h1 { font-size: 15px; }
+    .hide-sm { display: none; }
+    .layout { grid-template-columns: 1fr; }
+    aside {
+      position: fixed;
+      top: 52px;
+      bottom: 0;
+      left: 0;
+      width: min(300px, 85vw);
+      z-index: 20;
+      transform: translateX(-100%);
+      transition: transform .2s;
+      box-shadow: 4px 0 16px rgba(0, 0, 0, .15);
+    }
+    body.menu-open aside { transform: none; }
+    .toolbar { padding: 8px 16px; }
+    .log { padding: 0 16px 48px; }
+    .acts { position: static; grid-column: 2; margin-top: 6px; }
+    .editing .msg .acts { display: flex; }
+    .msg.sys .acts { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <button class="btn icon" id="menuBtn" title="檔案列表" aria-label="檔案列表">☰</button>
+  <h1>CCFolia Log 檢視器</h1>
+  <span class="spacer"></span>
+  <button class="btn primary" id="uploadBtn">上傳<span class="hide-sm">&nbsp;HTML</span></button>
+  <button class="btn icon" id="themeBtn" title="切換明暗主題" aria-label="切換明暗主題"></button>
+  <input type="file" id="fileInput" accept=".html,.htm,text/html" multiple hidden>
+</header>
+
+<div class="layout">
+  <aside>
+    <div class="aside-top">
+      <input class="field" id="search" type="search" placeholder="搜尋檔案…">
+    </div>
+    <ul id="fileList"></ul>
+    <div class="aside-foot" id="storageInfo">檔案儲存於此瀏覽器</div>
+  </aside>
+
+  <main id="main">
+    <div class="empty" id="empty">
+      <div class="drop-card">
+        <strong>尚未開啟檔案</strong>
+        拖曳 CCFolia 匯出的 HTML 到此處，或從左側選擇已上傳的檔案。
+        <br><button class="btn primary" id="uploadBtn2">選擇檔案</button>
+      </div>
+    </div>
+
+    <div id="viewer" hidden>
+      <div class="toolbar">
+        <select class="field" id="channel" hidden></select>
+        <span class="spacer"></span>
+        <span class="dirty-dot" id="dirty" hidden>● 尚未儲存</span>
+        <button class="btn" id="editBtn">編輯</button>
+        <button class="btn" id="sourceBtn">原始碼</button>
+        <button class="btn primary" id="saveBtn" disabled>儲存</button>
+        <button class="btn" id="downloadBtn">下載</button>
+        <button class="btn danger" id="deleteBtn">刪除</button>
+      </div>
+      <div class="log" id="log">
+        <input id="title" readonly spellcheck="false" aria-label="標題">
+        <div class="log-info" id="info"></div>
+        <div id="messages"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<dialog id="sourceDlg">
+  <form method="dialog">
+    <div class="d-head">編輯原始碼</div>
+    <textarea id="sourceText" spellcheck="false"></textarea>
+    <div class="d-foot">
+      <button class="btn" value="cancel">取消</button>
+      <button class="btn primary" value="apply">套用</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast"></div>
+<style id="avatarCss"></style>
+
+<script>
+const $ = (s) => document.querySelector(s);
+
+/* ================= IndexedDB ================= */
+const DB = (() => {
+  let dbp;
+  const open = () => dbp ??= new Promise((res, rej) => {
+    const r = indexedDB.open('ccf-log-viewer', 1);
+    r.onupgradeneeded = () => {
+      r.result.createObjectStore('meta', { keyPath: 'id' });
+      r.result.createObjectStore('html');
+    };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  const run = async (stores, mode, fn) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+      const t = db.transaction(stores, mode);
+      const req = fn(t);
+      t.oncomplete = () => res(req?.result);
+      t.onerror = t.onabort = () => rej(t.error);
+    });
+  };
+  return {
+    list: () => run(['meta'], 'readonly', (t) => t.objectStore('meta').getAll()),
+    html: (id) => run(['html'], 'readonly', (t) => t.objectStore('html').get(id)),
+    put: (meta, html) => run(['meta', 'html'], 'readwrite', (t) => {
+      t.objectStore('meta').put(meta);
+      t.objectStore('html').put(html, meta.id);
+    }),
+    del: (id) => run(['meta', 'html'], 'readwrite', (t) => {
+      t.objectStore('meta').delete(id);
+      t.objectStore('html').delete(id);
+    }),
+  };
+})();
+navigator.storage?.persist?.();
+
+/* ================= CCFolia 格式 ================= */
+function parseLog(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  if (!doc.querySelector('article.message')) throw new Error('找不到 CCFolia 訊息，請確認是 CCFolia 匯出的 HTML');
+  return doc;
+}
+const getTitle = (doc) => (doc.querySelector('.log-title')?.textContent || doc.title || '未命名').trim();
+function setTitle(doc, t) {
+  doc.title = t;
+  const h = doc.querySelector('.log-title');
+  if (h) h.textContent = t;
+}
+const countMsgs = (doc) => doc.querySelectorAll('article.message').length;
+const serialize = (doc) => '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+
+// 只取出頭像圖片，不注入原檔的其他 CSS
+function avatarCss(doc) {
+  const re = /\.avatar-image-(\d+)\s*\{\s*background-image:\s*url\((["']?)(.*?)\2\)\s*;?\s*\}/g;
+  let css = '';
+  for (const s of doc.querySelectorAll('style')) {
+    for (const m of s.textContent.matchAll(re)) {
+      const url = m[3];
+      if (/^(data:image\/|https?:\/\/)/i.test(url) && !/["\\\n<]/.test(url)) {
+        css += `.av-${m[1]}{background-image:url("${url}")}\n`;
+      }
+    }
+  }
+  return css;
+}
+
+function speakerColor(el) {
+  const m = /--speaker-color:\s*([^;]+)/.exec(el?.getAttribute('style') || '');
+  return m ? m[1].trim() : '#888888';
+}
+function toHex(c) {
+  if (/^#[0-9a-f]{6}$/i.test(c)) return c;
+  if (/^#[0-9a-f]{3}$/i.test(c)) return '#' + [...c.slice(1)].map((x) => x + x).join('');
+  return '#888888';
+}
+
+/* ================= 狀態 ================= */
+const state = {
+  files: [],
+  id: null,
+  doc: null,
+  dirty: false,
+  editing: false,
+  channel: '',
+};
+const srcOf = new WeakMap(); // 畫面元素 -> 原檔 article
+
+/* ================= 渲染訊息 ================= */
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function renderMsg(art) {
+  const sys = art.classList.contains('system');
+  const box = el('div', 'msg' + (sys ? ' sys' : ''));
+  box.dataset.channel = art.dataset.channel || '';
+  srcOf.set(box, art);
+  const text = (art.querySelector('.message-text')?.textContent ?? '').replace(/^\n+|\s+$/g, '');
+
+  if (sys) {
+    box.append(el('div', 'text', text));
+  } else {
+    const avSrc = art.querySelector('.avatar');
+    const n = avSrc && [...avSrc.classList].find((c) => /^avatar-image-\d+$/.test(c));
+    box.append(el('span', 'avatar ' + (n ? 'av-' + n.split('-')[2] : 'none')));
+
+    const body = el('div', 'body');
+    const head = el('div', 'head');
+    const sp = art.querySelector('.speaker');
+    const name = el('span', 'speaker', sp?.textContent ?? '');
+    name.style.setProperty('--c', speakerColor(sp));
+    head.append(name);
+    const time = art.querySelector('.timestamp');
+    if (time) head.append(el('span', 'time', time.textContent));
+    const ch = art.querySelector('.channel-name');
+    if (ch) head.append(el('span', 'chan', ch.textContent));
+    if (art.querySelector('.edited')) head.append(el('span', 'edited', '已編輯'));
+    body.append(head, el('div', 'text', text));
+
+    const roll = art.querySelector('.roll-result');
+    if (roll) {
+      const r = el('span', 'roll', roll.textContent);
+      for (const c of ['success', 'failure', 'critical', 'fumble']) if (roll.classList.contains(c)) r.classList.add(c);
+      body.append(r);
+    }
+    box.append(body);
+  }
+
+  const acts = el('div', 'acts');
+  const eb = el('button', 'btn act-edit', '修改'); eb.type = 'button';
+  const db = el('button', 'btn danger act-del', '刪除'); db.type = 'button';
+  acts.append(eb, db);
+  box.append(acts);
+  if (state.channel && box.dataset.channel !== state.channel) box.hidden = true;
+  return box;
+}
+
+function renderLog() {
+  const doc = state.doc;
+  $('#avatarCss').textContent = avatarCss(doc);
+  $('#title').value = getTitle(doc);
+  document.title = getTitle(doc) + ' - CCFolia Log 檢視器';
+
+  const arts = [...doc.querySelectorAll('article.message')];
+  const channels = [...new Set(arts.map((a) => a.dataset.channel || ''))];
+  const sel = $('#channel');
+  if (!channels.includes(state.channel)) state.channel = '';
+  sel.hidden = channels.length < 2;
+  sel.replaceChildren(new Option('全部頻道', ''), ...channels.map((c) => new Option(c === 'main' ? '主頻道' : c || '（無）', c)));
+  sel.value = state.channel;
+
+  $('#messages').replaceChildren(...arts.map(renderMsg));
+  updateInfo();
+}
+
+function updateInfo() {
+  const meta = state.files.find((f) => f.id === state.id);
+  const n = countMsgs(state.doc);
+  $('#info').textContent = `${n} 則訊息` + (meta ? ` · ${meta.name} · 更新於 ${fmtDate(meta.updatedAt)}` : '');
+}
+
+/* ================= 檔案列表 ================= */
+const fmtDate = (t) => new Date(t).toLocaleString('zh-TW', { dateStyle: 'short', timeStyle: 'short', hour12: false });
+
+async function refreshList() {
+  state.files = (await DB.list()).sort((a, b) => b.updatedAt - a.updatedAt);
+  renderList();
+}
+
+function renderList() {
+  const q = $('#search').value.trim().toLowerCase();
+  const ul = $('#fileList');
+  const files = state.files.filter((f) => !q || f.title.toLowerCase().includes(q) || f.name.toLowerCase().includes(q));
+  if (!files.length) {
+    ul.replaceChildren(el('li', 'list-empty', state.files.length ? '沒有符合的檔案' : '還沒有上傳任何檔案'));
+    ul.firstChild.style.cursor = 'default';
+  } else {
+    ul.replaceChildren(...files.map((f) => {
+      const li = el('li', f.id === state.id ? 'active' : '');
+      li.dataset.id = f.id;
+      li.title = f.title;
+      li.append(el('div', 'name', f.title), el('div', 'meta', `${f.count} 則 · ${fmtDate(f.updatedAt)}`));
+      return li;
+    }));
+  }
+  $('#storageInfo').textContent = `共 ${state.files.length} 個檔案 · 儲存於此瀏覽器`;
+}
+
+/* ================= 開啟 / 儲存 ================= */
+function confirmDiscard() {
+  return !state.dirty || confirm('目前的修改尚未儲存，確定要放棄嗎？');
+}
+
+async function openFile(id, force = false) {
+  if (!force && id === state.id) return;
+  if (!force && !confirmDiscard()) return;
+  const html = await DB.html(id);
+  if (html == null) { toast('找不到檔案'); return; }
+  state.id = id;
+  state.doc = parseLog(html);
+  setDirty(false);
+  setEditing(false);
+  $('#empty').hidden = true;
+  $('#viewer').hidden = false;
+  $('#main').scrollTop = 0;
+  renderLog();
+  renderList();
+  history.replaceState(null, '', '#' + id);
+  document.body.classList.remove('menu-open');
+}
+
+function closeFile() {
+  state.id = null;
+  state.doc = null;
+  setDirty(false);
+  $('#viewer').hidden = true;
+  $('#empty').hidden = false;
+  $('#avatarCss').textContent = '';
+  document.title = 'CCFolia Log 檢視器';
+  history.replaceState(null, '', location.pathname + location.search);
+  renderList();
+}
+
+async function save() {
+  if (!state.doc || !state.dirty) return;
+  const meta = state.files.find((f) => f.id === state.id);
+  const next = { ...meta, title: getTitle(state.doc), count: countMsgs(state.doc), updatedAt: Date.now() };
+  try {
+    await DB.put(next, serialize(state.doc));
+  } catch (e) {
+    toast('儲存失敗：' + e.message);
+    return;
+  }
+  setDirty(false);
+  await refreshList();
+  updateInfo();
+  toast('已儲存');
+}
+
+function setDirty(v) {
+  state.dirty = v;
+  $('#dirty').hidden = !v;
+  $('#saveBtn').disabled = !v;
+}
+
+function setEditing(v) {
+  state.editing = v;
+  $('#log').classList.toggle('editing', v);
+  $('#editBtn').classList.toggle('on', v);
+  $('#editBtn').textContent = v ? '完成編輯' : '編輯';
+  $('#title').readOnly = !v;
+  if (!v) document.querySelectorAll('.msg .editor').forEach((f) => f.closest('.msg').replaceWith(renderMsg(srcOf.get(f.closest('.msg')))));
+}
+
+/* ================= 上傳 ================= */
+async function uploadFiles(list) {
+  let lastId = null, ok = 0;
+  for (const file of list) {
+    try {
+      const html = await file.text();
+      const doc = parseLog(html);
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      const now = Date.now();
+      await DB.put({ id, name: file.name, title: getTitle(doc), count: countMsgs(doc), createdAt: now, updatedAt: now }, html);
+      lastId = id;
+      ok++;
+    } catch (e) {
+      toast(`${file.name}：${e.message}`, 4000);
+    }
+  }
+  await refreshList();
+  if (ok) toast(`已上傳 ${ok} 個檔案`);
+  if (lastId) openFile(lastId);
+}
+
+/* ================= 訊息編輯 ================= */
+function openEditor(box) {
+  const art = srcOf.get(box);
+  const sys = art.classList.contains('system');
+  const form = el('form', 'editor');
+  const txt = el('textarea');
+  txt.value = (art.querySelector('.message-text')?.textContent ?? '').replace(/^\n+|\s+$/g, '');
+  txt.rows = Math.min(16, txt.value.split('\n').length + 1);
+
+  let nameIn, colorIn;
+  if (!sys) {
+    const sp = art.querySelector('.speaker');
+    const row = el('div', 'row');
+    nameIn = el('input', 'field');
+    nameIn.placeholder = '發言者';
+    nameIn.value = sp?.textContent ?? '';
+    colorIn = el('input');
+    colorIn.type = 'color';
+    colorIn.title = '名稱顏色';
+    colorIn.value = toHex(speakerColor(sp));
+    row.append(nameIn, colorIn);
+    form.append(row);
+  }
+  const btns = el('div', 'row end');
+  const cancel = el('button', 'btn', '取消'); cancel.type = 'button';
+  const ok = el('button', 'btn primary', '確定');
+  btns.append(cancel, ok);
+  form.append(txt, btns);
+
+  cancel.onclick = () => box.replaceWith(renderMsg(art));
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const t = art.querySelector('.message-text');
+    if (t) t.textContent = txt.value;
+    if (!sys) {
+      const sp = art.querySelector('.speaker');
+      if (sp) {
+        sp.textContent = nameIn.value;
+        sp.setAttribute('style', '--speaker-color:' + colorIn.value);
+      }
+    }
+    box.replaceWith(renderMsg(art));
+    setDirty(true);
+  };
+  txt.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); form.requestSubmit(); }
+    if (e.key === 'Escape') cancel.click();
+  });
+
+  box.replaceChildren(form);
+  txt.focus();
+}
+
+$('#messages').addEventListener('click', (e) => {
+  const box = e.target.closest('.msg');
+  if (!box) return;
+  if (e.target.closest('.act-edit')) openEditor(box);
+  if (e.target.closest('.act-del')) {
+    if (!confirm('確定刪除這則訊息？')) return;
+    srcOf.get(box).remove();
+    box.remove();
+    setDirty(true);
+    updateInfo();
+  }
+});
+
+$('#title').addEventListener('input', () => {
+  setTitle(state.doc, $('#title').value);
+  setDirty(true);
+});
+
+/* ================= 原始碼 ================= */
+$('#sourceBtn').onclick = () => {
+  $('#sourceText').value = serialize(state.doc);
+  $('#sourceDlg').showModal();
+};
+$('#sourceDlg').addEventListener('close', () => {
+  if ($('#sourceDlg').returnValue !== 'apply') return;
+  try {
+    state.doc = parseLog($('#sourceText').value);
+    setDirty(true);
+    renderLog();
+  } catch (e) {
+    toast(e.message, 4000);
+  }
+});
+
+/* ================= 其他按鈕 ================= */
+$('#editBtn').onclick = () => setEditing(!state.editing);
+$('#saveBtn').onclick = save;
+$('#downloadBtn').onclick = () => {
+  const blob = new Blob([serialize(state.doc)], { type: 'text/html' });
+  const a = el('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = getTitle(state.doc).replace(/[\\/:*?"<>|]/g, '_') + '.html';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+$('#deleteBtn').onclick = async () => {
+  if (!confirm(`確定刪除「${getTitle(state.doc)}」？此動作無法復原。`)) return;
+  await DB.del(state.id);
+  setDirty(false);
+  await refreshList();
+  closeFile();
+  toast('已刪除');
+};
+$('#channel').onchange = (e) => {
+  state.channel = e.target.value;
+  document.querySelectorAll('#messages .msg').forEach((m) => { m.hidden = !!state.channel && m.dataset.channel !== state.channel; });
+};
+
+$('#fileList').addEventListener('click', (e) => {
+  const li = e.target.closest('li[data-id]');
+  if (li) openFile(li.dataset.id);
+});
+$('#search').addEventListener('input', renderList);
+
+const pick = () => $('#fileInput').click();
+$('#uploadBtn').onclick = pick;
+$('#uploadBtn2').onclick = pick;
+$('#fileInput').onchange = (e) => { uploadFiles([...e.target.files]); e.target.value = ''; };
+
+$('#menuBtn').onclick = () => document.body.classList.toggle('menu-open');
+$('#main').addEventListener('click', () => document.body.classList.remove('menu-open'));
+
+// 主題
+function applyThemeIcon() {
+  const dark = document.documentElement.dataset.theme === 'dark';
+  $('#themeBtn').textContent = dark ? '☀' : '☾';
+}
+$('#themeBtn').onclick = () => {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem('lv-theme', next); } catch {}
+  applyThemeIcon();
+};
+applyThemeIcon();
+
+// 拖曳上傳
+let dragDepth = 0;
+const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+addEventListener('dragenter', (e) => { if (hasFiles(e)) { dragDepth++; document.body.classList.add('dragging'); } });
+addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+addEventListener('drop', (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove('dragging');
+  const files = [...e.dataTransfer.files].filter((f) => /\.html?$/i.test(f.name) || f.type === 'text/html');
+  if (files.length) uploadFiles(files);
+  else toast('請拖曳 HTML 檔案');
+});
+
+// 快捷鍵與離開提醒
+addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
+});
+addEventListener('beforeunload', (e) => { if (state.dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+let toastTimer;
+function toast(msg, ms = 2000) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+/* ================= 啟動 ================= */
+(async () => {
+  try {
+    await refreshList();
+    const id = location.hash.slice(1);
+    if (id && state.files.some((f) => f.id === id)) openFile(id, true);
+  } catch (e) {
+    toast('無法開啟瀏覽器儲存空間：' + e.message, 5000);
+  }
+})();
+</script>
+</body>
+</html>
