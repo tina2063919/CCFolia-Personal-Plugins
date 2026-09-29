@@ -188,6 +188,16 @@
     background: var(--hover) no-repeat center / cover;
   }
   .avatar.none { background: transparent; }
+  .avatar.letter { display: grid; place-items: center; background: var(--accent); color: var(--accent-text); font-weight: 700; }
+  .speaker.plain { color: var(--text); }
+  .badge { font-size: 10px; font-weight: 700; padding: 0 4px; border-radius: 3px; background: var(--accent); color: var(--accent-text); }
+  .reply, .extra { font-size: 13px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .reply { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .extra { margin-top: 6px; padding: 6px 10px; border-left: 3px solid var(--border); background: var(--hover); border-radius: 4px; }
+  .atts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .atts img { max-width: min(400px, 100%); max-height: 280px; border-radius: 4px; object-fit: contain; }
+  .atts .file { font-size: 13px; color: var(--accent); }
+  .msg.sys.divider { padding-left: 0; text-align: center; font-size: 12px; }
   .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
   .speaker {
     font-weight: 600;
@@ -356,7 +366,7 @@
     <div class="empty" id="empty">
       <div class="drop-card">
         <strong id="emptyTitle">尚未開啟檔案</strong>
-        <span id="emptyText">拖曳 CCFolia 匯出的 HTML 到此處，或從左側選擇已上傳的檔案。</span>
+        <span id="emptyText">拖曳 CCFolia 或 Discord 機器人匯出的 HTML 到此處，或從左側選擇已上傳的檔案。</span>
         <br><button class="btn primary" id="uploadBtn2">選擇檔案</button>
       </div>
     </div>
@@ -441,19 +451,117 @@ const DB = (() => {
 })();
 navigator.storage?.persist?.();
 
-/* ================= CCFolia 格式 ================= */
+/* ================= 檔案格式（CCFolia / Discord 機器人匯出） ================= */
+const DC_MSG = '.wrap > .msg, .wrap > .sysmsg';
+const DC_ITEMS = DC_MSG + ', .wrap > .div';
+const isDiscord = (doc) => !doc.querySelector('article.message') && !!doc.querySelector('.wrap > .msg .bd');
+
 function parseLog(html) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
-  if (!doc.querySelector('article.message')) throw new Error('找不到 CCFolia 訊息，請確認是 CCFolia 匯出的 HTML');
+  if (!doc.querySelector('article.message') && !isDiscord(doc)) {
+    throw new Error('找不到訊息，請確認是 CCFolia 或 Discord 機器人匯出的 HTML');
+  }
   return doc;
 }
-const getTitle = (doc) => (doc.querySelector('.log-title')?.textContent || doc.title || '未命名').trim();
+const titleEl = (doc) => doc.querySelector('.log-title') || doc.querySelector('.hdr h1');
+const getTitle = (doc) => (titleEl(doc)?.textContent || doc.title || '未命名').trim();
 function setTitle(doc, t) {
   doc.title = t;
-  const h = doc.querySelector('.log-title');
+  const h = titleEl(doc);
   if (h) h.textContent = t;
 }
-const countMsgs = (doc) => doc.querySelectorAll('article.message').length;
+const logItems = (doc) => [...doc.querySelectorAll(isDiscord(doc) ? DC_ITEMS : 'article.message')];
+const countMsgs = (doc) => doc.querySelectorAll(isDiscord(doc) ? DC_MSG : 'article.message').length;
+const safeUrl = (u) => (/^(data:image\/|https?:\/\/)/i.test(u || '') && !/["\\\n<]/.test(u) ? u : null);
+const trimText = (s) => s.replace(/^\n+|\s+$/g, '');
+
+// Discord 訊息內文：<br> 轉換行，其餘取純文字
+function dcText(node) {
+  if (!node) return '';
+  const c = node.cloneNode(true);
+  c.querySelectorAll('br').forEach((b) => b.replaceWith('\n'));
+  c.querySelectorAll('li, pre').forEach((b) => b.append('\n'));
+  return c.textContent;
+}
+const dcBlock = (e) => [...e.children].map((c) => dcText(c).trim()).filter(Boolean).join('\n') || e.textContent.trim();
+
+// 將原檔訊息節點讀成統一的資料
+function readMsg(node) {
+  if (node.matches('article')) {
+    const sys = node.classList.contains('system');
+    const text = trimText(node.querySelector('.message-text')?.textContent ?? '');
+    if (sys) return { kind: 'sys', text };
+    const av = node.querySelector('.avatar');
+    const n = av && [...av.classList].find((c) => /^avatar-image-\d+$/.test(c));
+    const sp = node.querySelector('.speaker');
+    const roll = node.querySelector('.roll-result');
+    return {
+      kind: 'msg', text,
+      avatarClass: n ? 'av-' + n.split('-')[2] : null,
+      name: sp?.textContent ?? '',
+      color: speakerColor(sp),
+      time: node.querySelector('.timestamp')?.textContent,
+      chan: node.querySelector('.channel-name')?.textContent,
+      edited: !!node.querySelector('.edited'),
+      roll: roll && { text: roll.textContent, cls: ['success', 'failure', 'critical', 'fumble'].filter((c) => roll.classList.contains(c)) },
+    };
+  }
+  // Discord
+  if (node.classList.contains('div')) return { kind: 'divider', text: node.textContent.trim() };
+  if (node.classList.contains('sysmsg')) {
+    const c = node.cloneNode(true);
+    c.querySelectorAll('.sysico, .systs').forEach((x) => x.remove());
+    return { kind: 'sys', text: c.textContent.trim(), time: node.querySelector('.systs')?.textContent.trim() };
+  }
+  const nm = node.querySelector('.nm');
+  const rp = node.querySelector('.bd > .rp');
+  return {
+    kind: 'msg',
+    text: trimText(dcText(node.querySelector('.tx'))),
+    avatarUrl: safeUrl(node.querySelector(':scope > img.av')?.getAttribute('src')),
+    avatarLetter: node.querySelector(':scope > .av-fb')?.textContent.trim(),
+    name: nm?.textContent ?? '',
+    color: /(?:^|;)\s*color:\s*([^;]+)/.exec(nm?.getAttribute('style') || '')?.[1].trim() || null,
+    time: node.querySelector('.ts')?.textContent,
+    bot: !!node.querySelector('.bt'),
+    reply: rp && [rp.querySelector('.rp-nm')?.textContent, rp.querySelector('.rp-tx')?.textContent].filter(Boolean).join('：'),
+    extras: [...node.querySelectorAll('.bd > .emb, .bd > .fwd, .bd > .poll, .bd > .comps, .bd > .stickers')].map(dcBlock).filter(Boolean),
+    images: [...node.querySelectorAll('.atts img')].map((i) => safeUrl(i.getAttribute('src'))).filter(Boolean),
+    files: [...node.querySelectorAll('.atts a.att-a')].map((a) => ({ name: a.textContent.trim(), href: /^https?:\/\//i.test(a.getAttribute('href') || '') ? a.getAttribute('href') : null })),
+  };
+}
+
+// 將修改寫回原檔節點
+function writeMsg(node, { text, name, color }) {
+  if (node.matches('article')) {
+    const t = node.querySelector('.message-text');
+    if (t) t.textContent = text;
+    const sp = node.querySelector('.speaker');
+    if (sp && name != null) sp.textContent = name;
+    if (sp && color) sp.setAttribute('style', '--speaker-color:' + color);
+    return;
+  }
+  const d = node.ownerDocument;
+  if (node.classList.contains('div')) { node.textContent = text; return; }
+  if (node.classList.contains('sysmsg')) {
+    [...node.childNodes].filter((n) => n.nodeType === 3).forEach((n) => n.remove());
+    const ico = node.querySelector('.sysico');
+    const tn = d.createTextNode(text);
+    ico ? ico.after(tn) : node.prepend(tn);
+    return;
+  }
+  let tx = node.querySelector('.tx');
+  if (!tx && text) {
+    tx = d.createElement('div');
+    tx.className = 'tx';
+    const row = node.querySelector('.bd > .row');
+    row ? row.after(tx) : node.querySelector('.bd')?.append(tx);
+  }
+  if (tx) tx.replaceChildren(...text.split('\n').flatMap((l, i) => (i ? [d.createElement('br'), l] : [l])));
+  const nm = node.querySelector('.nm');
+  if (nm && name != null) nm.textContent = name;
+  if (nm && color) nm.setAttribute('style', 'color:' + color);
+}
 const serialize = (doc) => '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
 
 // 只取出頭像圖片，不注入原檔的其他 CSS
@@ -505,37 +613,55 @@ function el(tag, cls, text) {
 }
 
 function renderMsg(art) {
-  const sys = art.classList.contains('system');
-  const box = el('div', 'msg' + (sys ? ' sys' : ''));
+  const m = readMsg(art);
+  const box = el('div', 'msg' + (m.kind === 'msg' ? '' : ' sys') + (m.kind === 'divider' ? ' divider' : ''));
   box.dataset.channel = art.dataset.channel || '';
   srcOf.set(box, art);
-  const text = (art.querySelector('.message-text')?.textContent ?? '').replace(/^\n+|\s+$/g, '');
 
-  if (sys) {
-    box.append(el('div', 'text', text));
+  if (m.kind !== 'msg') {
+    box.append(el('div', 'text', m.text));
+    if (m.time) box.firstChild.append(el('span', 'time', ' ' + m.time));
   } else {
-    const avSrc = art.querySelector('.avatar');
-    const n = avSrc && [...avSrc.classList].find((c) => /^avatar-image-\d+$/.test(c));
-    box.append(el('span', 'avatar ' + (n ? 'av-' + n.split('-')[2] : 'none')));
+    const av = el('span', 'avatar ' + (m.avatarClass || (m.avatarUrl ? '' : m.avatarLetter ? 'letter' : 'none')));
+    if (m.avatarUrl) av.style.backgroundImage = `url("${m.avatarUrl}")`;
+    else if (m.avatarLetter) av.textContent = m.avatarLetter;
+    box.append(av);
 
     const body = el('div', 'body');
     const head = el('div', 'head');
-    const sp = art.querySelector('.speaker');
-    const name = el('span', 'speaker', sp?.textContent ?? '');
-    name.style.setProperty('--c', speakerColor(sp));
+    const name = el('span', 'speaker', m.name);
+    if (m.color) name.style.setProperty('--c', m.color);
+    else name.classList.add('plain');
     head.append(name);
-    const time = art.querySelector('.timestamp');
-    if (time) head.append(el('span', 'time', time.textContent));
-    const ch = art.querySelector('.channel-name');
-    if (ch) head.append(el('span', 'chan', ch.textContent));
-    if (art.querySelector('.edited')) head.append(el('span', 'edited', '已編輯'));
-    body.append(head, el('div', 'text', text));
+    if (m.bot) head.append(el('span', 'badge', 'BOT'));
+    if (m.time) head.append(el('span', 'time', m.time));
+    if (m.chan) head.append(el('span', 'chan', m.chan));
+    if (m.edited) head.append(el('span', 'edited', '已編輯'));
+    body.append(head);
+    if (m.reply) body.append(el('div', 'reply', '↪ ' + m.reply));
+    body.append(el('div', 'text', m.text));
 
-    const roll = art.querySelector('.roll-result');
-    if (roll) {
-      const r = el('span', 'roll', roll.textContent);
-      for (const c of ['success', 'failure', 'critical', 'fumble']) if (roll.classList.contains(c)) r.classList.add(c);
+    if (m.roll) {
+      const r = el('span', 'roll', m.roll.text);
+      r.classList.add(...m.roll.cls);
       body.append(r);
+    }
+    for (const x of m.extras || []) body.append(el('div', 'extra', x));
+    if (m.images?.length || m.files?.length) {
+      const atts = el('div', 'atts');
+      for (const src of m.images) {
+        const img = el('img');
+        img.src = src;
+        img.loading = 'lazy';
+        img.alt = '';
+        atts.append(img);
+      }
+      for (const f of m.files) {
+        const a = el(f.href ? 'a' : 'span', 'file', '📎 ' + f.name);
+        if (f.href) { a.href = f.href; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+        atts.append(a);
+      }
+      body.append(atts);
     }
     box.append(body);
   }
@@ -555,7 +681,7 @@ function renderLog() {
   $('#title').value = getTitle(doc);
   document.title = getTitle(doc) + ' - CCFolia Log 檢視器';
 
-  const arts = [...doc.querySelectorAll('article.message')];
+  const arts = logItems(doc);
   const channels = [...new Set(arts.map((a) => a.dataset.channel || ''))];
   const sel = $('#channel');
   if (!channels.includes(state.channel)) state.channel = '';
@@ -698,23 +824,23 @@ async function uploadFiles(list) {
 /* ================= 訊息編輯 ================= */
 function openEditor(box) {
   const art = srcOf.get(box);
-  const sys = art.classList.contains('system');
+  const m = readMsg(art);
+  const sys = m.kind !== 'msg';
   const form = el('form', 'editor');
   const txt = el('textarea');
-  txt.value = (art.querySelector('.message-text')?.textContent ?? '').replace(/^\n+|\s+$/g, '');
+  txt.value = m.text;
   txt.rows = Math.min(16, txt.value.split('\n').length + 1);
 
-  let nameIn, colorIn;
+  let nameIn, colorIn, color0;
   if (!sys) {
-    const sp = art.querySelector('.speaker');
     const row = el('div', 'row');
     nameIn = el('input', 'field');
     nameIn.placeholder = '發言者';
-    nameIn.value = sp?.textContent ?? '';
+    nameIn.value = m.name;
     colorIn = el('input');
     colorIn.type = 'color';
     colorIn.title = '名稱顏色';
-    colorIn.value = toHex(speakerColor(sp));
+    colorIn.value = color0 = toHex(m.color || '#888888');
     row.append(nameIn, colorIn);
     form.append(row);
   }
@@ -727,15 +853,11 @@ function openEditor(box) {
   cancel.onclick = () => box.replaceWith(renderMsg(art));
   form.onsubmit = (e) => {
     e.preventDefault();
-    const t = art.querySelector('.message-text');
-    if (t) t.textContent = txt.value;
-    if (!sys) {
-      const sp = art.querySelector('.speaker');
-      if (sp) {
-        sp.textContent = nameIn.value;
-        sp.setAttribute('style', '--speaker-color:' + colorIn.value);
-      }
-    }
+    writeMsg(art, {
+      text: txt.value,
+      name: sys ? null : nameIn.value,
+      color: !sys && colorIn.value !== color0 ? colorIn.value : null,
+    });
     box.replaceWith(renderMsg(art));
     setDirty(true);
   };
