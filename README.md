@@ -14,7 +14,7 @@ CCFolia 個人用 userscript 集合。所有腳本都可獨立安裝與啟用，
 
 ## Log 檢視器
 
-[log-viewer/index.html](log-viewer/index.html) 是單一檔案的靜態網頁，用來讀取與展示 CCFolia 匯出的 HTML 紀錄（含舊版格式），也支援 Discord 機器人匯出的頻道 HTML。
+[log-viewer/](log-viewer/) 是不需建置的靜態網頁（`index.html` + `css/` + `js/`），用來讀取與展示 CCFolia 匯出的 HTML 紀錄（含舊版格式），也支援 Discord 機器人匯出的頻道 HTML。
 
 - 上傳（按鈕或拖曳，可一次多檔）、已上傳檔案列表與搜尋
 - 明暗主題切換、多頻道紀錄的頻道篩選
