@@ -219,6 +219,47 @@
   .editor .row { display: flex; gap: 8px; align-items: center; }
   .editor .row.end { justify-content: flex-end; }
   .editor input[type="color"] { width: 40px; height: 32px; padding: 2px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+  .editor .row > .field { flex: 1; min-width: 0; }
+
+  /* 角色下拉選單 */
+  .char-pick { position: relative; flex: none; }
+  .char-btn { max-width: 220px; }
+  .char-pick .speaker { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .char-pick .avatar { width: 22px; height: 22px; flex: none; font-size: 12px; }
+  .char-pick .avatar.none { display: none; }
+  .char-btn .caret { font-size: 11px; color: var(--muted); }
+  .char-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 10;
+    width: 280px;
+    max-width: calc(100vw - 48px);
+    max-height: 320px;
+    overflow-y: auto;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+  }
+  .char-menu .field { margin-bottom: 4px; }
+  .char-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    text-align: left;
+    cursor: pointer;
+  }
+  .char-item:hover, .char-item:focus-visible { background: var(--hover); outline: none; }
+  .char-item.cur { box-shadow: inset 3px 0 0 var(--accent); }
+  .char-item .count { margin-left: auto; padding-left: 8px; font-size: 12px; color: var(--muted); }
+
   textarea {
     width: 100%;
     padding: 8px 10px;
@@ -594,6 +635,42 @@ function writeMsg(node, { text, name, color }) {
   if (nm && name != null) nm.textContent = name;
   if (nm && color) nm.setAttribute('style', 'color:' + color);
 }
+
+/* ---------- 角色（頭貼 + 名稱） ---------- */
+const charKey = (m) => (m.avatarClass || m.avatarUrl || m.avatarLetter || '') + '\n' + m.name;
+// 依出現順序列出 log 中所有角色，node 為該角色第一則發言（換角色時從這裡複製頭貼）
+function collectChars(doc) {
+  const map = new Map();
+  for (const node of logItems(doc)) {
+    const m = readMsg(node);
+    if (m.kind !== 'msg') continue;
+    const key = charKey(m);
+    const c = map.get(key);
+    if (c) c.count++;
+    else map.set(key, { key, m, node, count: 1 });
+  }
+  return [...map.values()];
+}
+const avatarSel = (node) => (node.matches('article') ? '.avatar' : node.matches('p') ? null : ':scope > img.av, :scope > .av-fb');
+// 把 ref 的頭貼節點複製到 node（舊版沒有頭貼）
+function swapAvatar(node, ref) {
+  const sel = avatarSel(node);
+  if (!sel || node === ref) return;
+  const olds = [...node.querySelectorAll(sel)];
+  const news = [...ref.querySelectorAll(sel)].map((e) => e.cloneNode(true));
+  if (olds.length) olds[0].before(...news);
+  else if (news.length) {
+    // 原本沒有頭貼：依 ref 中的位置插入
+    const path = [];
+    for (let e = ref.querySelector(sel); e !== ref; e = e.parentElement) path.unshift([...e.parentElement.children].indexOf(e));
+    let parent = node;
+    for (const i of path.slice(0, -1)) parent = parent.children[i] ?? parent;
+    parent.insertBefore(news[0], parent.children[path.at(-1)] ?? null);
+    news[0].after(...news.slice(1));
+  }
+  olds.forEach((e) => e.remove());
+}
+
 const serialize = (doc) => '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
 
 // 只取出頭像圖片，不注入原檔的其他 CSS
@@ -644,6 +721,19 @@ function el(tag, cls, text) {
   return e;
 }
 
+function avatarEl(m) {
+  const av = el('span', 'avatar ' + (m.avatarClass || (m.avatarUrl ? '' : m.avatarLetter ? 'letter' : 'none')));
+  if (m.avatarUrl) av.style.backgroundImage = `url("${m.avatarUrl}")`;
+  else if (m.avatarLetter) av.textContent = m.avatarLetter;
+  return av;
+}
+function speakerEl(m) {
+  const name = el('span', 'speaker', m.name);
+  if (m.color) name.style.setProperty('--c', m.color);
+  else name.classList.add('plain');
+  return name;
+}
+
 function renderMsg(art) {
   const m = readMsg(art);
   const box = el('div', 'msg' + (m.kind === 'msg' ? '' : ' sys') + (m.kind === 'divider' ? ' divider' : ''));
@@ -654,17 +744,11 @@ function renderMsg(art) {
     box.append(el('div', 'text', m.text));
     if (m.time) box.firstChild.append(el('span', 'time', ' ' + m.time));
   } else {
-    const av = el('span', 'avatar ' + (m.avatarClass || (m.avatarUrl ? '' : m.avatarLetter ? 'letter' : 'none')));
-    if (m.avatarUrl) av.style.backgroundImage = `url("${m.avatarUrl}")`;
-    else if (m.avatarLetter) av.textContent = m.avatarLetter;
-    box.append(av);
+    box.append(avatarEl(m));
 
     const body = el('div', 'body');
     const head = el('div', 'head');
-    const name = el('span', 'speaker', m.name);
-    if (m.color) name.style.setProperty('--c', m.color);
-    else name.classList.add('plain');
-    head.append(name);
+    head.append(speakerEl(m));
     if (m.bot) head.append(el('span', 'badge', 'BOT'));
     if (m.time) head.append(el('span', 'time', m.time));
     if (m.chan) head.append(el('span', 'chan', m.chan));
@@ -859,6 +943,68 @@ async function uploadFiles(list) {
 }
 
 /* ================= 訊息編輯 ================= */
+// 角色下拉選單：顯示頭貼 + 名稱，選擇後呼叫 onPick(角色)
+function charPicker(chars, cur, onPick) {
+  const wrap = el('div', 'char-pick');
+  const btn = el('button', 'btn char-btn');
+  btn.type = 'button';
+  btn.title = '更換角色';
+  btn.setAttribute('aria-haspopup', 'listbox');
+  const label = (m) => [avatarEl(m), speakerEl({ ...m, name: m.name || '（無名）' })];
+  const show = (m) => btn.replaceChildren(...label(m), el('span', 'caret', '▾'));
+  show(cur);
+
+  const menu = el('div', 'char-menu');
+  menu.hidden = true;
+  menu.setAttribute('role', 'listbox');
+  let curKey = charKey(cur);
+  const items = chars.map((c) => {
+    const it = el('button', 'char-item');
+    it.type = 'button';
+    it.setAttribute('role', 'option');
+    it.append(...label(c.m), el('span', 'count', c.count));
+    it.onclick = () => { curKey = c.key; onPick(c); show(c.m); close(); btn.focus(); };
+    return [it, c];
+  });
+  let filter;
+  if (chars.length > 8) {
+    filter = el('input', 'field');
+    filter.type = 'search';
+    filter.placeholder = '搜尋角色…';
+    filter.oninput = () => {
+      const q = filter.value.trim().toLowerCase();
+      items.forEach(([it, c]) => { it.hidden = !!q && !c.m.name.toLowerCase().includes(q); });
+    };
+    menu.append(filter);
+  }
+  menu.append(...items.map(([it]) => it));
+
+  const outside = (e) => { if (!wrap.contains(e.target)) close(); };
+  function open() {
+    items.forEach(([it, c]) => it.classList.toggle('cur', c.key === curKey));
+    menu.hidden = false;
+    document.addEventListener('pointerdown', outside);
+    (filter || items.find(([it]) => it.classList.contains('cur'))?.[0] || items[0]?.[0])?.focus();
+  }
+  function close() {
+    menu.hidden = true;
+    document.removeEventListener('pointerdown', outside);
+  }
+  btn.onclick = () => (menu.hidden ? open() : close());
+  wrap.addEventListener('keydown', (e) => {
+    if (menu.hidden) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); btn.focus(); }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const vis = items.map(([it]) => it).filter((it) => !it.hidden);
+      const i = vis.indexOf(document.activeElement);
+      vis[e.key === 'ArrowDown' ? Math.min(i + 1, vis.length - 1) : Math.max(i - 1, 0)]?.focus();
+    }
+  });
+  wrap.append(btn, menu);
+  return wrap;
+}
+
 function openEditor(box) {
   const art = srcOf.get(box);
   const m = readMsg(art);
@@ -868,7 +1014,7 @@ function openEditor(box) {
   txt.value = m.text;
   txt.rows = Math.min(16, txt.value.split('\n').length + 1);
 
-  let nameIn, colorIn, color0;
+  let nameIn, colorIn, colorAt, picked = null;
   if (!sys) {
     const row = el('div', 'row');
     nameIn = el('input', 'field');
@@ -877,7 +1023,15 @@ function openEditor(box) {
     colorIn = el('input');
     colorIn.type = 'color';
     colorIn.title = '名稱顏色';
-    colorIn.value = color0 = toHex(m.color || '#888888');
+    colorIn.value = colorAt = toHex(m.color || '#888888');
+    const chars = collectChars(state.doc);
+    if (chars.length > 1) {
+      row.append(charPicker(chars, m, (c) => {
+        picked = c;
+        nameIn.value = c.m.name;
+        colorIn.value = colorAt = toHex(c.m.color || '#888888');
+      }));
+    }
     row.append(nameIn, colorIn);
     form.append(row);
   }
@@ -890,10 +1044,12 @@ function openEditor(box) {
   cancel.onclick = () => box.replaceWith(renderMsg(art));
   form.onsubmit = (e) => {
     e.preventDefault();
+    if (picked) swapAvatar(art, picked.node);
     writeMsg(art, {
       text: txt.value,
       name: sys ? null : nameIn.value,
-      color: !sys && colorIn.value !== color0 ? colorIn.value : null,
+      // 手動改過顏色以手動為準，否則沿用所選角色的原始顏色
+      color: sys ? null : colorIn.value !== colorAt ? colorIn.value : picked?.m.color ?? null,
     });
     box.replaceWith(renderMsg(art));
     setDirty(true);
