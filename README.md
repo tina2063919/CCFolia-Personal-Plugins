@@ -7,7 +7,7 @@ CCFolia 個人用 userscript 集合。所有腳本都可獨立安裝與啟用，
 | 腳本 | 功能 |
 | --- | --- |
 | [ccf-room-folders.user.js](ccf-room-folders.user.js) | 在首頁房間列表加入資料夾，可分類、篩選、拖曳排序，並匯出或匯入分類資料。 |
-| [ccf-external-rooms.user.js](ccf-external-rooms.user.js) | 在首頁加入「其他房間」頁籤，輸入非自己建立的房間網址即可保存，與自己的房間分開顯示；進房時自動記錄進入時間與房間名稱。 |
+| [ccf-external-rooms.user.js](ccf-external-rooms.user.js) | 在首頁加入「其他房間」頁籤，輸入非自己建立的房間網址即可保存，與自己的房間分開顯示；進房時自動記錄上次進入時間。 |
 | [ccf-char-switcher.user.js](ccf-char-switcher.user.js) | 在房間內顯示可拖曳的角色快速切換面板，快速切換聊天發言角色。 |
 | [ccf-chat-palette.user.js](ccf-chat-palette.user.js) | 在房間內顯示可拖曳的常用對話面板，點選指令即可送出，並支援角色差分圖片預覽。 |
 | [ccf-light-input.user.js](ccf-light-input.user.js) | 將聊天輸入區與訊息紀錄切換為明亮主題，並為各聊天頁籤分別保存輸入草稿。 |

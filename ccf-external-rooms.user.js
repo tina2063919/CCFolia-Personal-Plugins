@@ -197,8 +197,7 @@
   document.head.appendChild(style);
 
   // ---- 資料 ----
-  // rooms: [{ id, name, autoName, addedAt, visitedAt }]
-  // autoName = true 表示名稱還沒被手動改過，進房時會用房間標題自動更新
+  // rooms: [{ id, name, addedAt, visitedAt }]
   let state = { rooms: [], tab: MINE };
   try {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY));
@@ -244,12 +243,11 @@
       alert('這間房間已經在「我的房間」裡，不需要另外加入。');
       return false;
     }
-    const name = prompt('房間名稱（之後進入房間時會自動更新，也可以之後再改）：', id)?.trim();
+    const name = prompt('房間名稱（之後可以再改）：', id)?.trim();
     if (name === undefined) return false; // 按了取消
     state.rooms.unshift({
       id,
       name: name || id,
-      autoName: !name || name === id,
       addedAt: Date.now(),
       visitedAt: 0,
     });
@@ -263,7 +261,6 @@
     const name = prompt('房間名稱：', r.name)?.trim();
     if (!name) return;
     r.name = name;
-    r.autoName = false;
     save();
   }
 
@@ -323,7 +320,6 @@
         state.rooms.push({
           id: r.id,
           name: r.name,
-          autoName: !!r.autoName,
           addedAt: r.addedAt || Date.now(),
           visitedAt: r.visitedAt || 0,
         });
@@ -549,27 +545,16 @@
     panelEl.appendChild(grid);
   }
 
-  // ---- 房間內：記錄進入時間、自動更新名稱 ----
-  const SITE_NAMES = /^(ココフォリア|CCFOLIA)$/i;
-
+  // ---- 房間內：記錄進入時間 ----
   function trackRoom() {
     const id = roomIdFromUrl(location.pathname);
     const r = id && roomById(id);
     if (!r) return;
-    let changed = false;
     // 同一次進房只記一次（一小時內不重複寫入）
     if (Date.now() - r.visitedAt > 3600e3) {
       r.visitedAt = Date.now();
-      changed = true;
+      save();
     }
-    if (r.autoName) {
-      const title = document.title.replace(/\s*[-|｜–—]\s*(ココフォリア|CCFOLIA).*$/i, '').trim();
-      if (title && !SITE_NAMES.test(title) && title !== r.name) {
-        r.name = title;
-        changed = true;
-      }
-    }
-    if (changed) save();
   }
 
   let loggedMissing = false;
@@ -638,10 +623,6 @@
     });
   }
   new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
-  // 房間標題可能晚一點才設定，定期檢查
-  setInterval(() => {
-    if (location.pathname.startsWith('/rooms/')) trackRoom();
-  }, 5000);
 
   apply();
 })();
