@@ -11,6 +11,7 @@ CCFolia 個人用 userscript 集合。所有腳本都可獨立安裝與啟用，
 | [ccf-char-switcher.user.js](ccf-char-switcher.user.js) | 在房間內顯示可拖曳的角色快速切換面板，快速切換聊天發言角色。 |
 | [ccf-chat-palette.user.js](ccf-chat-palette.user.js) | 在房間內顯示可拖曳的常用對話面板，點選指令即可送出，並支援角色差分圖片預覽。 |
 | [ccf-light-input.user.js](ccf-light-input.user.js) | 將聊天輸入區與訊息紀錄切換為明亮主題，並為各聊天頁籤分別保存輸入草稿。 |
+| [ccf-color-picker.user.js](ccf-color-picker.user.js) | 在角色名稱的顏色選單旁加上調色盤，可拖曳選出任意顏色。 |
 | [ccf-tab-notify.user.js](ccf-tab-notify.user.js) | 偵測其他聊天頁籤的新訊息並播放提示音，可設定音量及各頁籤是否提示。 |
 
 ## Log 檢視器

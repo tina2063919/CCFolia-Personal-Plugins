@@ -224,7 +224,7 @@
     return null;
   }
 
-  // 淺色文字 → 深色、深色底 → 淺色，保留原本色相（擲骰結果的藍色、角色名稱顏色等）
+  // 淺色文字 → 深色、深色底 → 淺色，保留原本色相（擲骰結果的藍色等）
   const SKIP = 'img, svg, svg *, canvas, video';
 
   // 記住被改過的元素原本的 inline 樣式，切回暗色主題時還原
@@ -249,10 +249,19 @@
     originals.clear();
   }
 
+  // 自己或祖先（紀錄區內）有原本就寫在 inline style 的文字顏色
+  function hasOwnColor(el) {
+    for (let a = el; a && a !== logEl; a = a.parentElement) {
+      if (a.style.color && !originals.has(a)) return true;
+    }
+    return false;
+  }
+
   function lightenEl(el, bgAlpha) {
     const cs = getComputedStyle(el);
 
-    const fg = parseRgb(cs.color);
+    // 角色名稱的顏色是 inline style 指定的，連同繼承該顏色的子元素都保持原色不轉換
+    const fg = !hasOwnColor(el) && parseRgb(cs.color);
     if (fg) {
       const hsl = rgbToHsl(fg);
       if (hsl.l > 0.5) {
